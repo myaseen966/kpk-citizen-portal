@@ -1,0 +1,147 @@
+name: CI/CD - Build, Push, Deploy
+
+# Triggers:
+#   - Push to main: build, push image to Docker Hub, then deploy to Kubernetes
+#   - Pull requests: build only (no push/deploy), as a CI check
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch: {} # Allows manually triggering a run from the GitHub UI.
+
+env:
+  IMAGE_NAME: kpk-citizen-portal
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Job 1: Build the Docker image (always runs, including on PRs, as a
+  # build-correctness check). Does not require any secrets.
+  # ---------------------------------------------------------------------
+  build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------
+  # Job 2: Build + push to Docker Hub. Only runs on pushes to main, never
+  # on pull requests from forks (which don't have access to secrets).
+  # ---------------------------------------------------------------------
+  push:
+    name: Push image to Docker Hub
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: meta
+        run: echo "image_tag=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------
+  # Job 3: Deploy to Kubernetes. Only runs after a successful push, and
+  # only if cluster credentials (KUBE_CONFIG) are configured as a repo
+  # secret. If you haven't connected a real cluster yet, this job is
+  # safely skipped rather than failing the whole pipeline.
+  # ---------------------------------------------------------------------
+  deploy:
+    name: Deploy to Kubernetes
+    needs: push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Check for cluster credentials
+        id: check-kubeconfig
+        run: |
+          if [ -z "${{ secrets.KUBE_CONFIG }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::KUBE_CONFIG secret not set - skipping deploy step. Configure it in repo Settings > Secrets to enable automatic deployment."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up kubectl
+        if: steps.check-kubeconfig.outputs.skip == 'false'
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        if: steps.check-kubeconfig.outputs.skip == 'false'
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+
+      - name: Apply Kubernetes manifests
+        if: steps.check-kubeconfig.outputs.skip == 'false'
+        run: |
+          kubectl apply -f kubernetes/namespace.yaml
+          kubectl apply -f kubernetes/configmap.yaml
+          kubectl apply -f kubernetes/secret.yaml
+          kubectl apply -f kubernetes/postgres-pvc.yaml
+          kubectl apply -f kubernetes/postgres-deployment.yaml
+          kubectl apply -f kubernetes/postgres-service.yaml
+          kubectl apply -f kubernetes/deployment.yaml
+          kubectl apply -f kubernetes/service.yaml
+          kubectl apply -f kubernetes/autoscaling/
+
+      - name: Set new image on Deployment (rolling update, zero downtime)
+        if: steps.check-kubeconfig.outputs.skip == 'false'
+        run: |
+          # kubernetes/deployment.yaml defaults to imagePullPolicy: Never
+          # (for local minikube use - see README Section 3). On a real
+          # cluster that policy would prevent Kubernetes from ever
+          # pulling the freshly-pushed Docker Hub image, so this patches
+          # both the image AND the pull policy together before rolling
+          # out, regardless of what's checked into the YAML file.
+          kubectl set image deployment/kpk-citizen-portal \
+            kpk-citizen-portal=${{ needs.push.outputs.image_tag }} \
+            -n kpk-citizen-portal
+          kubectl patch deployment kpk-citizen-portal -n kpk-citizen-portal \
+            --type='json' -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Always"}]'
+          kubectl rollout status deployment/kpk-citizen-portal -n kpk-citizen-portal --timeout=180s
+
+      - name: Run Prisma migration
+        if: steps.check-kubeconfig.outputs.skip == 'false'
+        run: |
+          POD=$(kubectl get pods -n kpk-citizen-portal -l app=kpk-citizen-portal -o jsonpath='{.items[0].metadata.name}')
+          kubectl exec -n kpk-citizen-portal "$POD" -- npx prisma migrate deploy

@@ -1,0 +1,14 @@
+# Non-sensitive configuration shared by the application and/or the
+# PostgreSQL deployment. Secrets (passwords, connection strings, JWT
+# secret) live in secret.yaml — this ConfigMap only holds values that are
+# safe to store in plain text.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kpk-citizen-portal-config
+  namespace: kpk-citizen-portal
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  POSTGRES_DB: "citizen_portal"
+  POSTGRES_USER: "postgres"

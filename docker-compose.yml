@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kpk-citizen-portal:local
+    container_name: kpk-citizen-portal-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Inside the Docker network, the database host is the service name
+      # "postgres" (not "localhost").
+      DATABASE_URL: "postgresql://postgres:12345@postgres:5432/citizen_portal?connection_limit=5&pool_timeout=30"
+      JWT_SECRET: "pakistan-citizen-portal-super-secret-key-2026"
+      NEXTAUTH_URL: "http://localhost:3000"
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - kpk-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: kpk-citizen-portal-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: citizen_portal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d citizen_portal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - kpk-network
+
+networks:
+  kpk-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local

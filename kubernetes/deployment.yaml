@@ -1,0 +1,97 @@
+# LOCAL (minikube) SETUP — this is the default, ready to use as-is:
+#   image: kpk-citizen-portal:latest  +  imagePullPolicy: Never
+# tells Kubernetes to use the image already built inside minikube's
+# Docker daemon (see README.md Section 3 "Run locally with minikube"),
+# instead of trying to pull from Docker Hub.
+#
+# SWITCHING TO DOCKER HUB / A REAL CLOUD CLUSTER LATER:
+#   1. Change `image:` below to DOCKERHUB_USERNAME/kpk-citizen-portal:latest
+#   2. Change `imagePullPolicy: Never` to `imagePullPolicy: Always`
+#   (See README.md Section 2 "Build and push to Docker Hub".)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kpk-citizen-portal
+  namespace: kpk-citizen-portal
+  labels:
+    app: kpk-citizen-portal
+spec:
+  replicas: 2
+  # Explicit rolling update strategy: always keep at least `replicas`
+  # pods available during a deploy (maxUnavailable: 0) by briefly
+  # creating one extra pod (maxSurge: 1) before terminating an old one.
+  # This is what gives zero-downtime rollouts when the CI/CD pipeline
+  # ships a new image.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: kpk-citizen-portal
+  template:
+    metadata:
+      labels:
+        app: kpk-citizen-portal
+    spec:
+      containers:
+        - name: kpk-citizen-portal
+          image: kpk-citizen-portal:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kpk-citizen-portal-secret
+                  key: DATABASE_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kpk-citizen-portal-secret
+                  key: JWT_SECRET
+            - name: NEXTAUTH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kpk-citizen-portal-secret
+                  key: NEXTAUTH_URL
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: kpk-citizen-portal-config
+                  key: NODE_ENV
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: kpk-citizen-portal-config
+                  key: PORT
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # NOTE: app/api/upload writes files to ./public/uploads on local
+          # container disk. With 2 replicas and no shared volume, uploaded
+          # files are NOT shared between pods. See README.md for options
+          # (shared PVC with ReadWriteMany, or object storage) if your
+          # uploads must be visible/persist across all replicas.
+

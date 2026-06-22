@@ -1,0 +1,14 @@
+# Ensures at least 1 app pod stays available during voluntary disruptions
+# (node drains, cluster upgrades, autoscaler scale-downs). Works alongside
+# the Deployment's existing liveness/readiness probes (self-healing of
+# crashed pods) and the HPA (load-based scaling).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kpk-citizen-portal-pdb
+  namespace: kpk-citizen-portal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: kpk-citizen-portal

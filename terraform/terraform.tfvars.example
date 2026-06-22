@@ -1,0 +1,14 @@
+# Copy this file to terraform.tfvars and fill in real values.
+# terraform.tfvars is gitignored - never commit real secrets.
+
+do_token     = "dop_v1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+jwt_secret   = "pakistan-citizen-portal-super-secret-key-2026"
+nextauth_url = "http://localhost:3000"
+
+# Optional overrides (defaults shown in variables.tf are usually fine to start with):
+# region             = "sgp1"
+# cluster_name       = "kpk-citizen-portal-cluster"
+# node_size          = "s-2vcpu-4gb"
+# min_nodes          = 2
+# max_nodes          = 4
+# db_size            = "db-s-1vcpu-1gb"
