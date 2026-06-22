@@ -60,10 +60,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# Prisma CLI + schema are kept in the final image so that
-# `npx prisma migrate deploy` can be run from inside the running
-# container/pod after deployment (migrations are intentionally NOT run
-# during the image build).
+# Copy the full node_modules from builder so Prisma CLI has ALL its
+# required files including .wasm binaries, engines, and schema parser.
+# The standalone output only includes runtime deps; Prisma CLI needs
+# additional files (prisma_schema_build_bg.wasm etc.) to run migrations.
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts

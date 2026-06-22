@@ -12,8 +12,5 @@ spec:
   ports:
     - port: 3000
       targetPort: 3000
-      # nodePort: 30080   # Optional: pin a specific port in the 30000-32767
-      #                     range. If omitted, Kubernetes assigns one
-      #                     automatically (check it with `kubectl get svc`).
       protocol: TCP
       name: http
