@@ -37,8 +37,8 @@ spec:
     spec:
       containers:
         - name: kpk-citizen-portal
-          image: kpk-citizen-portal:latest
-          imagePullPolicy: Never
+          image: myaseenhayat/kpk-citizen-portal:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
               name: http
@@ -94,4 +94,3 @@ spec:
           # files are NOT shared between pods. See README.md for options
           # (shared PVC with ReadWriteMany, or object storage) if your
           # uploads must be visible/persist across all replicas.
-
